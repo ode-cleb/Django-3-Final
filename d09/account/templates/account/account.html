@@ -1,0 +1,10 @@
+{% extends 'account/base.html' %}
+{% block content %}
+<div id="account-container">
+  {% if user.is_authenticated %}
+    {% include 'account/_logged_in.html' %}
+  {% else %}
+    {% include 'account/_login_form.html' %}
+  {% endif %}
+</div>
+{% endblock %}
