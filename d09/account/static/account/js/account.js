@@ -51,7 +51,36 @@ $(function () {
       error: function (xhr) {
         // Login refusé (HTTP 400) : on affiche les erreurs du formulaire.
         const errors = xhr.responseJSON && xhr.responseJSON.errors;
-        renderErrors(errors);
+        renderErrors($('#form-errors'), errors);
+      }
+    });
+  });
+
+  // Bouton "Create user" / "Back" : on affiche l'un des deux blocs et on cache
+  // l'autre avec l'attribut "hidden" (tout est déjà dans la page, pas de requête serveur).
+  $container.on('click', '#show-register', function () {
+    $('#login-box').prop('hidden', true);
+    $('#register-box').prop('hidden', false);
+  });
+  $container.on('click', '#show-login', function () {
+    $('#register-box').prop('hidden', true);
+    $('#login-box').prop('hidden', false);
+  });
+
+  // Création d'utilisateur : POST AJAX. Succès -> l'utilisateur est créé et
+  // connecté, on affiche "Logged as ..." ; erreur -> messages dans #register-errors.
+  $container.on('submit', '#register-form', function (e) {
+    e.preventDefault();
+    const $form = $(this);
+    $.ajax({
+      url: $form.attr('action'),
+      type: 'POST',
+      data: $form.serialize(),
+      success: function (resp) {
+        $container.html(resp.html);
+      },
+      error: function (xhr) {
+        renderErrors($('#register-errors'), xhr.responseJSON && xhr.responseJSON.errors);
       }
     });
   });
@@ -69,10 +98,10 @@ $(function () {
     });
   });
 
-  // Affiche les erreurs ({champ: [messages]}) dans la zone #form-errors.
+  // Affiche les erreurs ({champ: [messages]}) dans la zone $box donnée.
   // .text() (et non .html()) évite toute injection de HTML.
-  function renderErrors(errors) {
-    const $box = $('#form-errors').empty();
+  function renderErrors($box, errors) {
+    $box.empty();
     if (!errors) { $box.text('An error occurred.'); return; }
     Object.keys(errors).forEach(function (field) {
       errors[field].forEach(function (msg) {

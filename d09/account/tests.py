@@ -48,3 +48,58 @@ class AccountAjaxTests(TestCase):
         self.assertEqual(r.status_code, 200)
         r = c.post(reverse('account:login'), creds, HTTP_X_CSRFTOKEN=token())
         self.assertEqual(r.status_code, 200)
+
+
+class RegisterTests(TestCase):
+    """Création d'utilisateur en AJAX (bouton "Create user")."""
+    url = 'account:register'
+    data = {'username': 'carol', 'password1': 'Str0ng-pass-42',
+            'password2': 'Str0ng-pass-42'}
+
+    def test_page_contains_create_user_button(self):
+        r = self.client.get(reverse('account:account'))
+        self.assertContains(r, 'id="show-register"')
+        self.assertContains(r, 'id="register-form"')
+
+    def test_register_creates_and_logs_in(self):
+        r = self.client.post(reverse(self.url), self.data)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('Logged as carol', r.json()['html'])
+        self.assertTrue(CustomUser.objects.filter(username='carol').exists())
+        r = self.client.get(reverse('account:account'))
+        self.assertContains(r, 'Logged as carol')
+
+    def test_register_password_mismatch(self):
+        r = self.client.post(reverse(self.url),
+                             {**self.data, 'password2': 'different'})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('password2', r.json()['errors'])
+        self.assertFalse(CustomUser.objects.filter(username='carol').exists())
+
+    def test_register_weak_password(self):
+        r = self.client.post(reverse(self.url),
+                             {**self.data, 'password1': '123', 'password2': '123'})
+        self.assertEqual(r.status_code, 400)
+
+    def test_register_username_taken(self):
+        CustomUser.objects.create_user('carol', password='x')
+        r = self.client.post(reverse(self.url), self.data)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('username', r.json()['errors'])
+
+    def test_register_get_not_allowed(self):
+        self.assertEqual(self.client.get(reverse(self.url)).status_code, 405)
+
+    def test_csrf_register_logout_login(self):
+        from django.test import Client
+        c = Client(enforce_csrf_checks=True)
+        c.get(reverse('account:account'))
+        token = lambda: c.cookies['csrftoken'].value
+        r = c.post(reverse(self.url), self.data, HTTP_X_CSRFTOKEN=token())
+        self.assertEqual(r.status_code, 200)
+        r = c.post(reverse('account:logout'), HTTP_X_CSRFTOKEN=token())
+        self.assertEqual(r.status_code, 200)
+        r = c.post(reverse('account:login'),
+                   {'username': 'carol', 'password': 'Str0ng-pass-42'},
+                   HTTP_X_CSRFTOKEN=token())
+        self.assertEqual(r.status_code, 200)

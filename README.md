@@ -13,9 +13,11 @@ python manage.py createsuperuser
 python manage.py runserver      # Daphne (ASGI) sert HTTP + websockets
 ```
 
-* `/account/` : login / logout en AJAX (ex00)
+* `/account/` : login / logout en AJAX (ex00) ; le bouton « Create user » permet de créer un compte (et de s'y connecter) sans quitter la page
 * `/chat/` : liste des 3 chatrooms ; `/chat/<id>/` : le chat (ex01–ex04)
 * `/admin/` : admin Django par défaut
+
+Un rafraîchissement de page (F5) dans une room est transparent : pas de « left » ni de nouveau « joined », et la conversation est conservée (voir `chat/consumers.py` et `chat/static/chat/js/chat.js`). Un vrai départ est annoncé après un court délai de grâce (`LEAVE_GRACE_SECONDS`, 3 s).
 
 Le channel layer est `InMemoryChannelLayer` (pas de Redis) : à utiliser avec un seul process.
 

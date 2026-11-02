@@ -1,16 +1,42 @@
-{# Formulaire de login. Les champs viennent d'AuthenticationForm ; l'envoi est
-   intercepté par account.js (AJAX). #errors reçoit les messages d'erreur. #}
-<h2 class="mb-3">Login</h2>
-<div id="form-errors" class="text-danger mb-2"></div>
-<form id="login-form" action="{% url 'account:login' %}" method="post">
-  {% csrf_token %}
-  <div class="mb-3">
-    <label for="id_username" class="form-label">Username</label>
-    {{ form.username }}
-  </div>
-  <div class="mb-3">
-    <label for="id_password" class="form-label">Password</label>
-    {{ form.password }}
-  </div>
-  <button type="submit" class="btn btn-primary">Login</button>
-</form>
+{# Fragment affiché quand l'utilisateur n'est pas connecté. Il contient DEUX blocs :
+   #login-box (formulaire de login, visible) et #register-box (création d'utilisateur,
+   caché par l'attribut HTML "hidden", qui marche même sans Bootstrap). account.js bascule de l'un à l'autre et envoie les formulaires en AJAX. #}
+<div id="login-box">
+  <h2 class="mb-3">Login</h2>
+  <div id="form-errors" class="text-danger mb-2"></div>
+  <form id="login-form" action="{% url 'account:login' %}" method="post">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label for="id_username" class="form-label">Username</label>
+      {{ form.username }}
+    </div>
+    <div class="mb-3">
+      <label for="id_password" class="form-label">Password</label>
+      {{ form.password }}
+    </div>
+    <button type="submit" class="btn btn-primary">Login</button>
+    <button type="button" id="show-register" class="btn btn-secondary">Create user</button>
+  </form>
+</div>
+
+<div id="register-box" hidden>
+  <h2 class="mb-3">Create user</h2>
+  <div id="register-errors" class="text-danger mb-2"></div>
+  <form id="register-form" action="{% url 'account:register' %}" method="post">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label for="register_username" class="form-label">Username</label>
+      {{ register_form.username }}
+    </div>
+    <div class="mb-3">
+      <label for="register_password1" class="form-label">Password</label>
+      {{ register_form.password1 }}
+    </div>
+    <div class="mb-3">
+      <label for="register_password2" class="form-label">Confirm password</label>
+      {{ register_form.password2 }}
+    </div>
+    <button type="submit" class="btn btn-primary">Create &amp; login</button>
+    <button type="button" id="show-login" class="btn btn-secondary">Back</button>
+  </form>
+</div>
