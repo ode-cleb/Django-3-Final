@@ -245,3 +245,40 @@ class RefreshTests(TransactionTestCase):
         await a.disconnect()
         await a2.disconnect()
         await asyncio.sleep(0.2)
+
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 5)
+    async def test_voluntary_leave_is_announced_immediately(self):
+        """Clic sur "← Rooms" : {"type":"leave"} puis fermeture => "left" sans délai."""
+        a, b, last = await self._start()
+        await b.send_json_to({'type': 'leave'})
+        await b.disconnect()
+        # le délai de grâce est de 5 s : un "left" reçu en moins de 0,5 s est immédiat
+        got = await asyncio.wait_for(a.receive_json_from(), 0.5)
+        self.assertEqual(got['message'], 'bob has left the chat')
+        self.assertEqual((await asyncio.wait_for(a.receive_json_from(), 0.5))['users'],
+                         ['alice'])
+        self.assertFalse(consumers.PENDING)
+        await a.disconnect()
+
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 5)
+    async def test_leave_frame_is_not_a_chat_message(self):
+        a, b, last = await self._start()
+        before = await database_sync_to_async(Message.objects.count)()
+        await b.send_json_to({'type': 'leave'})
+        self.assertTrue(await a.receive_nothing(timeout=0.3))   # rien n'est diffusé
+        self.assertEqual(await database_sync_to_async(Message.objects.count)(), before)
+        await a.disconnect()
+        await b.disconnect()
+
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 5)
+    async def test_leave_with_another_socket_of_same_tab_announces_nothing(self):
+        a, b, last = await self._start()
+        b2 = communicator(self.room.id, self.bob, last=last, sid='sid-bob-000001')
+        await b2.connect()                               # 2 websockets pour l'onglet de bob
+        await self._drain(a, b2)
+        await b.send_json_to({'type': 'leave'})
+        await b.disconnect()
+        self.assertTrue(await a.receive_nothing(timeout=0.4))
+        self.assertEqual(sorted(consumers.ONLINE[self.room.id]), ['alice', 'bob'])
+        await a.disconnect()
+        await b2.disconnect()

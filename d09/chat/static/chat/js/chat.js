@@ -123,6 +123,23 @@ $(function () {
     scrollToBottom();
   };
 
+  // Départ volontaire : clic sur "← Rooms". On oublie l'état de cette room (un retour
+  // sera une vraie nouvelle arrivée) et on prévient le serveur, qui annonce alors
+  // "left" tout de suite au lieu d'attendre le délai prévu pour les rechargements.
+  // La navigation se fait ensuite normalement (le navigateur ferme le websocket).
+  $('#rooms-link').on('click', function () {
+    try { sessionStorage.removeItem(storageKey); } catch (err) {}
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'leave' }));
+    }
+  });
+
+  // Bouton Précédent : si le navigateur ressuscite cette page depuis son cache, son
+  // websocket est fermé. On recharge pour se reconnecter proprement.
+  $(window).on('pageshow', function (e) {
+    if (e.originalEvent && e.originalEvent.persisted) { location.reload(); }
+  });
+
   // Envoi d'un message : on l'envoie au serveur, qui le renverra à tout le
   // monde (y compris nous) ; c'est à ce moment qu'il s'affiche.
   $('#chat-form').on('submit', function (e) {

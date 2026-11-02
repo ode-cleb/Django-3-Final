@@ -17,7 +17,7 @@ python manage.py runserver      # Daphne (ASGI) sert HTTP + websockets
 * `/chat/` : liste des 3 chatrooms ; `/chat/<id>/` : le chat (ex01–ex04)
 * `/admin/` : admin Django par défaut
 
-Un rafraîchissement de page (F5) dans une room est transparent : pas de « left » ni de nouveau « joined », et la conversation est conservée. Le serveur suit la présence par onglet (identifiant `sid` conservé dans `sessionStorage`), ce qui marche quel que soit l'ordre ancien/nouveau websocket (voir `chat/consumers.py` et `chat/static/chat/js/chat.js`). Un vrai départ est annoncé après un court délai de grâce (`LEAVE_GRACE_SECONDS`, 3 s).
+Un rafraîchissement de page (F5) dans une room est transparent : pas de « left » ni de nouveau « joined », et la conversation est conservée. Le serveur suit la présence par onglet (identifiant `sid` conservé dans `sessionStorage`), ce qui marche quel que soit l'ordre ancien/nouveau websocket (voir `chat/consumers.py` et `chat/static/chat/js/chat.js`). Un vrai départ est annoncé après un court délai de grâce (`LEAVE_GRACE_SECONDS`, 1 s) ; le clic sur « ← Rooms » est annoncé immédiatement.
 
 Le channel layer est `InMemoryChannelLayer` (pas de Redis) : à utiliser avec un seul process.
 

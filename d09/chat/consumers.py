@@ -22,6 +22,8 @@ navigateur au travers des rechargements, voir chat.js) envoyé dans l'URL du web
     aucun "joined", et seuls les messages manqués (id > N) sont renvoyés.
   - Quand le dernier websocket d'un onglet se ferme, le "left" n'est annoncé qu'après
     LEAVE_GRACE_SECONDS ; une reprise dans ce délai l'annule.
+  - Exception : si le navigateur a envoyé {"type": "leave"} (clic sur "← Rooms"), le
+    départ est volontaire et le "left" est annoncé immédiatement.
 """
 import asyncio
 import json
@@ -40,7 +42,7 @@ HISTORY_SIZE = 3
 
 # Délai (en secondes) avant d'annoncer qu'un utilisateur a quitté la room : laisse
 # le temps à une page rafraîchie de se reconnecter sans que cela se remarque.
-LEAVE_GRACE_SECONDS = 3
+LEAVE_GRACE_SECONDS = 1
 
 # Un sid valide : lettres, chiffres, "_" et "-" (8 à 64 caractères).
 SID_RE = re.compile(r'^[A-Za-z0-9_-]{8,64}$')
@@ -92,6 +94,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.user = self.scope['user']  # fourni par AuthMiddlewareStack (session Django)
         self.room_id = self.scope['url_route']['kwargs']['room_id']  # vient de routing.py
         self.group = f'chat_{self.room_id}'  # nom du groupe Channels de cette room
+        self.leaving = False  # passe à True si le navigateur annonce un départ volontaire
         self.joined = False  # permet à disconnect() de savoir si la connexion a été acceptée
 
         # Chat réservé aux utilisateurs connectés, et la room doit exister.
@@ -157,14 +160,23 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # Dernier websocket de l'onglet : le "left" et le retrait de la liste sont
         # différés (voir finalize_leave) pour qu'un rechargement puisse annuler le départ.
+        # Sauf départ volontaire (self.leaving) : il n'y a rien à annuler, délai nul.
+        delay = 0 if self.leaving else LEAVE_GRACE_SECONDS
         PENDING[(self.room_id, self.user.username, self.sid)] = asyncio.ensure_future(
             finalize_leave(self.channel_layer, self.room_id, self.user.username,
-                           self.sid, self.group, LEAVE_GRACE_SECONDS))
+                           self.sid, self.group, delay))
 
     async def receive(self, text_data=None, bytes_data=None):
-        """Appelée quand le navigateur envoie un message : {"message": "..."}."""
+        """Appelée quand le navigateur envoie :
+          - {"message": "..."} : un message de chat ;
+          - {"type": "leave"}  : "je quitte volontairement la room" (voir chat.js)."""
         try:
-            content = json.loads(text_data)['message'].strip()
+            data = json.loads(text_data)
+            if data.get('type') == 'leave':
+                # Départ volontaire : à la fermeture du socket, "left" sera immédiat.
+                self.leaving = True
+                return
+            content = data['message'].strip()
         except (TypeError, ValueError, KeyError, AttributeError):
             return  # données invalides : on ignore
         if not content:
