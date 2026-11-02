@@ -1,3 +1,5 @@
+{# Formulaire de login. Les champs viennent d'AuthenticationForm ; l'envoi est
+   intercepté par account.js (AJAX). #errors reçoit les messages d'erreur. #}
 <h2 class="mb-3">Login</h2>
 <div id="form-errors" class="text-danger mb-2"></div>
 <form id="login-form" action="{% url 'account:login' %}" method="post">

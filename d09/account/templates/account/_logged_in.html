@@ -1,4 +1,5 @@
-{# account/templates/account/_logged_in.html #}
+{# Affiché quand l'utilisateur est connecté. Le bouton envoie un POST AJAX
+   vers l'URL stockée dans data-url (voir account.js). #}
 <h2 class="mb-3">Logged as {{ user.username }}</h2>
 <button id="logout-btn" class="btn btn-danger"
         data-url="{% url 'account:logout' %}">Logout</button>

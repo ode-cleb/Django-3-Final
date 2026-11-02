@@ -1,12 +1,14 @@
-/* Ex04: fixed-size message container, scrolls when full. */
+/* Ex04 : conteneur des messages à taille FIXE ; si les messages dépassent la
+   hauteur, ils défilent grâce à overflow-y: auto (barre de scroll). */
 #messages {
   width: 500px;
   height: 350px;
   overflow-y: auto;
-  flex: 0 0 auto;
-  word-wrap: break-word;
+  flex: 0 0 auto;          /* ne pas laisser flexbox changer la taille */
+  word-wrap: break-word;   /* coupe les mots très longs au lieu de déborder */
 }
 
+/* Ex03 : liste des utilisateurs connectés, dans un conteneur séparé. */
 #users {
   width: 200px;
   height: 350px;
@@ -14,6 +16,7 @@
   flex: 0 0 auto;
 }
 
+/* Messages "has joined / has left the chat" : discrets, en italique. */
 #messages .system {
   color: #6c757d;
   font-style: italic;

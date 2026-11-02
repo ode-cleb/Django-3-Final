@@ -31,18 +31,20 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
-    'daphne',
+    'daphne',  # serveur ASGI : doit être en premier pour que runserver gère aussi les websockets
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'channels',
-    'account',
-    'chat',
+    'channels',  # Django Channels : websockets
+    'account',  # ex00 : login/logout AJAX
+    'chat',  # ex01-ex04 : chatrooms
+
 ]
 
+# Modèle utilisateur personnalisé (défini dans account/models.py)
 AUTH_USER_MODEL = 'account.CustomUser'
 
 MIDDLEWARE = [
@@ -73,6 +75,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'd09.wsgi.application'
+# Point d'entrée ASGI (HTTP + websockets), défini dans d09/asgi.py
 ASGI_APPLICATION = 'd09.asgi.application'
 
 # In-memory layer: no Redis needed, valid for a single server process.
@@ -82,6 +85,7 @@ CHANNEL_LAYERS = {
     },
 }
 
+# Les pages protégées (@login_required) redirigent vers /account/ pour se connecter
 LOGIN_URL = 'account:account'
 
 

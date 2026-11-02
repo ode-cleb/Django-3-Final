@@ -19,6 +19,10 @@ from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E40
 
 import chat.routing  # noqa: E402
 
+# Aiguillage selon le protocole :
+#  - http      -> application Django habituelle ;
+#  - websocket -> vérification de l'origine (ALLOWED_HOSTS), puis authentification
+#                 via la session Django (donne scope['user']), puis routing du chat.
 application = ProtocolTypeRouter({
     'http': django_asgi_app,
     'websocket': AllowedHostsOriginValidator(
