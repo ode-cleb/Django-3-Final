@@ -5,8 +5,8 @@
 {# Ex01 : le nom de la room est affiché dans le <h2>. #}
 {% block content %}
 <h2 class="mb-3" id="room-name">{{ room.name }}</h2>
-{# #messages (ex04 : taille fixe + scroll) et #users (ex03 : liste des connectés)
-   sont deux conteneurs distincts, remplis par chat.js. #}
+{% comment %} #messages (ex04 : taille fixe + scroll) et #users (ex03 : liste des connectés)
+   sont deux conteneurs distincts, remplis par chat.js. {% endcomment %}
 <div class="d-flex gap-3">
   <div id="messages" class="border rounded p-2"></div>
   <div id="users" class="border rounded p-2">

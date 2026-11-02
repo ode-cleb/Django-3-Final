@@ -1,8 +1,8 @@
 {% extends 'account/base.html' %}
 {% load static %}
 {% block content %}
-{# Ex00 : rendu côté serveur selon l'état de connexion. Le JS (account.js) remplace
-   ensuite le contenu de #account-container sans recharger la page. #}
+{% comment %} Ex00 : rendu côté serveur selon l'état de connexion. Le JS (account.js) remplace
+   ensuite le contenu de #account-container sans recharger la page. {% endcomment %}
 <div id="account-container">
   {% if user.is_authenticated %}
     {% include 'account/_logged_in.html' %}

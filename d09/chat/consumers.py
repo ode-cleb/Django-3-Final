@@ -13,15 +13,20 @@ Messages JSON envoyés au navigateur (champ "type") :
   - users   : la liste des utilisateurs connectés (ex03)
 
 Rafraîchir la page (F5) ferme le websocket puis en rouvre un. Pour que ce ne soit
-pas pris pour un vrai départ suivi d'une vraie arrivée :
-  1. à la déconnexion, le "left" n'est annoncé qu'après LEAVE_GRACE_SECONDS ;
-  2. si le navigateur se reconnecte dans ce délai en disant "j'ai déjà vu les
-     messages jusqu'à l'id N" (?last=N dans l'URL), c'est une REPRISE : le "left"
-     est annulé, aucun "joined" n'est envoyé, et on ne renvoie que les messages
-     manqués (id > N). Le navigateur réaffiche lui-même ce qu'il avait déjà.
+pas pris pour un vrai départ suivi d'une vraie arrivée, la présence est suivie par
+ONGLET et non par connexion : chaque onglet a un identifiant "sid" (conservé par le
+navigateur au travers des rechargements, voir chat.js) envoyé dans l'URL du websocket
+(?sid=...&last=N, N = dernier message vu).
+  - Une connexion dont le sid est DÉJÀ connu est une REPRISE, quel que soit l'ordre
+    d'arrivée (nouvelle connexion avant OU après la fermeture de l'ancienne) :
+    aucun "joined", et seuls les messages manqués (id > N) sont renvoyés.
+  - Quand le dernier websocket d'un onglet se ferme, le "left" n'est annoncé qu'après
+    LEAVE_GRACE_SECONDS ; une reprise dans ce délai l'annule.
 """
 import asyncio
 import json
+import re
+import secrets
 from collections import defaultdict
 from urllib.parse import parse_qs
 
@@ -37,35 +42,39 @@ HISTORY_SIZE = 3
 # le temps à une page rafraîchie de se reconnecter sans que cela se remarque.
 LEAVE_GRACE_SECONDS = 3
 
-# Suivi des utilisateurs connectés (ex03) : {room_id: {username: nb_connexions}}.
-# On compte les connexions car un même utilisateur peut ouvrir plusieurs onglets :
-# il ne disparaît de la liste que lorsque son DERNIER onglet est fermé.
+# Un sid valide : lettres, chiffres, "_" et "-" (8 à 64 caractères).
+SID_RE = re.compile(r'^[A-Za-z0-9_-]{8,64}$')
+
+# Suivi des utilisateurs connectés (ex03) :
+#   ONLINE[room_id][username][sid] = nombre de websockets ouverts par cet onglet
+# Un onglet a normalement 1 websocket, 2 pendant quelques instants lors d'un F5
+# (l'ancien n'est pas encore fermé quand le nouveau arrive). Un utilisateur reste dans
+# la liste tant qu'au moins un de ses onglets est présent.
 # Un simple dict en mémoire suffit car le channel layer est lui aussi en mémoire
 # (un seul processus serveur).
-ONLINE = defaultdict(dict)
+ONLINE = defaultdict(lambda: defaultdict(dict))
 
-# Départs en attente (délai de grâce) : {(room_id, username): [tâches asyncio]}.
-PENDING = defaultdict(list)
+# Départs en attente (délai de grâce) : {(room_id, username, sid): tâche asyncio}.
+PENDING = {}
 
 
-async def finalize_leave(channel_layer, room_id, username, group, delay):
-    """Au bout du délai, si personne n'a repris la place : retire l'utilisateur de la
-    liste puis annonce "left" et la nouvelle liste à ceux qui restent."""
+async def finalize_leave(channel_layer, room_id, username, sid, group, delay):
+    """Au bout du délai, si l'onglet n'est pas revenu : le retire de la liste puis
+    annonce "left" et la nouvelle liste à ceux qui restent."""
     await asyncio.sleep(delay)
 
     # On se retire de PENDING AVANT de modifier l'état : à partir d'ici une
-    # reconnexion ne peut plus annuler ce départ.
-    key = (room_id, username)
-    PENDING[key].remove(asyncio.current_task())
-    if not PENDING[key]:
-        del PENDING[key]
+    # reconnexion ne peut plus annuler ce départ (elle sera traitée comme une arrivée).
+    PENDING.pop((room_id, username, sid), None)
 
-    users = ONLINE[room_id]
-    users[username] -= 1
-    if users[username] <= 0:
-        del users[username]
-    if not users:
-        ONLINE.pop(room_id, None)
+    tabs = ONLINE[room_id][username]
+    if tabs.get(sid, 0) > 0:
+        return  # un websocket de cet onglet s'est rouvert entre-temps
+    tabs.pop(sid, None)
+    if not tabs:
+        del ONLINE[room_id][username]
+    if not ONLINE[room_id]:
+        del ONLINE[room_id]
 
     await channel_layer.group_send(group, {
         'type': 'chat.system',
@@ -90,21 +99,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
-        # Reprise après rafraîchissement ? Il faut que le navigateur indique le dernier
-        # message vu (?last=N) ET qu'un départ de cet utilisateur soit en attente.
-        key = (self.room_id, self.user.username)
-        last = self.last_seen_id()
-        resumed = last is not None and bool(PENDING.get(key))
+        # Reprise après rafraîchissement ? Il faut que le navigateur donne l'identifiant
+        # de son onglet (?sid=...) et le dernier message vu (?last=N), ET que cet onglet
+        # soit déjà connu du serveur (websocket encore ouvert, ou départ en attente).
+        self.sid, last = self.query_params()
+        tabs = ONLINE[self.room_id][self.user.username]
+        resumed = last is not None and self.sid in tabs
         if resumed:
-            # On annule le départ en attente : la nouvelle connexion prend sa place
-            # (le compteur ONLINE reste donc inchangé).
-            PENDING[key].pop().cancel()
-            if not PENDING[key]:
-                del PENDING[key]
-        else:
-            # Ex03 : on enregistre l'utilisateur comme connecté dans cette room.
-            users = ONLINE[self.room_id]
-            users[self.user.username] = users.get(self.user.username, 0) + 1
+            # Même onglet qui se reconnecte : on annule un éventuel départ en attente.
+            task = PENDING.pop((self.room_id, self.user.username, self.sid), None)
+            if task:
+                task.cancel()
+        # Ex03 : on compte ce websocket pour cet onglet (nouvel onglet => nouvelle entrée).
+        tabs[self.sid] = tabs.get(self.sid, 0) + 1
 
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
@@ -141,12 +148,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return  # connexion refusée au départ : rien à nettoyer
 
         await self.channel_layer.group_discard(self.group, self.channel_name)
-        # Ex03 : le "left" et le retrait de la liste sont différés (voir finalize_leave)
-        # pour qu'un simple rafraîchissement de page puisse annuler le départ.
-        task = asyncio.ensure_future(finalize_leave(
-            self.channel_layer, self.room_id, self.user.username,
-            self.group, LEAVE_GRACE_SECONDS))
-        PENDING[(self.room_id, self.user.username)].append(task)
+
+        # Ex03 : un websocket de moins pour cet onglet.
+        tabs = ONLINE[self.room_id][self.user.username]
+        tabs[self.sid] -= 1
+        if tabs[self.sid] > 0:
+            return  # un autre websocket du même onglet est ouvert (F5 en cours) : rien à annoncer
+
+        # Dernier websocket de l'onglet : le "left" et le retrait de la liste sont
+        # différés (voir finalize_leave) pour qu'un rechargement puisse annuler le départ.
+        PENDING[(self.room_id, self.user.username, self.sid)] = asyncio.ensure_future(
+            finalize_leave(self.channel_layer, self.room_id, self.user.username,
+                           self.sid, self.group, LEAVE_GRACE_SECONDS))
 
     async def receive(self, text_data=None, bytes_data=None):
         """Appelée quand le navigateur envoie un message : {"message": "..."}."""
@@ -165,13 +178,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'message': content,
         })
 
-    def last_seen_id(self):
-        """Lit ?last=N dans l'URL du websocket (None si absent ou invalide)."""
+    def query_params(self):
+        """Lit ?sid=...&last=N dans l'URL du websocket.
+        Renvoie (sid, last) : sid est généré côté serveur s'il manque ou est invalide
+        (onglet non reprenable) ; last vaut None s'il manque ou est invalide."""
         query = parse_qs(self.scope.get('query_string', b'').decode())
+        sid = query.get('sid', [''])[0]
+        if not SID_RE.match(sid):
+            sid = secrets.token_urlsafe(12)
+            return sid, None
         try:
-            return int(query['last'][0])
+            last = int(query['last'][0])
         except (KeyError, IndexError, ValueError):
-            return None
+            last = None
+        return sid, last
 
     async def broadcast_users(self):
         """Envoie à toute la room la liste (triée) des utilisateurs connectés."""

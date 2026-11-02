@@ -2,20 +2,36 @@
 // Uniquement jQuery + WebSocket natif : aucune requête AJAX.
 //
 // Rafraîchissement de la page (F5) : le navigateur efface tout, donc on garde dans
-// sessionStorage (propre à l'onglet) ce qui est affiché ainsi que l'id du dernier
-// message vu. À la reconnexion on le signale au serveur (?last=N) ; s'il confirme
-// qu'il s'agit d'une reprise ("resumed"), on réaffiche tout ce qui était à l'écran
-// puis les messages manqués. Un nouvel arrivant n'a rien en mémoire : il voit
-// seulement les 3 derniers messages envoyés par le serveur (ex02).
+// sessionStorage (propre à l'onglet) ce qui est affiché, l'id du dernier message vu
+// et un identifiant d'onglet "sid". À la reconnexion on envoie ?sid=...&last=N : le
+// serveur reconnaît l'onglet (même si l'ancien websocket n'est pas encore fermé) et
+// répond "resumed" : on réaffiche alors tout ce qui était à l'écran puis les messages
+// manqués, sans "left"/"joined". Un nouvel arrivant voit seulement les 3 derniers
+// messages envoyés par le serveur (ex02).
 $(function () {
   const MAX_ENTRIES = 500;                       // limite de ce qu'on garde en mémoire
   const storageKey = 'chat:' + window.CHAT_ROOM_ID;
 
-  // État sauvegardé : {last: id du dernier message vu, entries: [{kind, user, text}]}
+  // Identifiant aléatoire de l'onglet (lettres/chiffres, 24 caractères).
+  function newSid() {
+    const bytes = new Uint8Array(12);
+    if (window.crypto && window.crypto.getRandomValues) {
+      window.crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i++) { bytes[i] = Math.floor(Math.random() * 256); }
+    }
+    return Array.prototype.map.call(bytes, function (b) {
+      return ('0' + b.toString(16)).slice(-2);
+    }).join('');
+  }
+
+  // État sauvegardé : {sid: identifiant de l'onglet, last: id du dernier message vu,
+  //                    entries: [{kind, user, text}]}
   function loadState() {
     try {
       const state = JSON.parse(sessionStorage.getItem(storageKey));
-      if (state && Array.isArray(state.entries) && Number.isInteger(state.last)) {
+      if (state && typeof state.sid === 'string' && Array.isArray(state.entries) &&
+          Number.isInteger(state.last)) {
         return state;
       }
     } catch (err) { /* sessionStorage indisponible ou contenu invalide */ }
@@ -25,13 +41,14 @@ $(function () {
     try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch (err) {}
   }
 
-  let state = loadState();  // null si c'est une vraie première arrivée dans la room
+  // Première visite de cet onglet dans cette room : état vide avec un nouveau sid.
+  let state = loadState() || {sid: newSid(), last: 0, entries: []};
 
   // ws:// en HTTP, wss:// en HTTPS. L'id de la room est injecté par room.html.
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   const socket = new WebSocket(
     scheme + '://' + location.host + '/ws/chat/' + window.CHAT_ROOM_ID + '/' +
-    (state ? '?last=' + state.last : '')
+    '?sid=' + state.sid + '&last=' + state.last
   );
 
   const $messages = $('#messages');   // liste des messages (ex04 : taille fixe + scroll)
@@ -73,10 +90,11 @@ $(function () {
     if (data.type === 'history') {
       // Rien n'est affiché avant ce premier message : c'est lui qui dit s'il s'agit
       // d'une reprise (on réaffiche l'écran d'avant) ou d'une vraie arrivée.
-      if (data.resumed && state) {
+      if (data.resumed) {
         state.entries.forEach(render);
       } else {
-        state = {last: 0, entries: []};
+        // Vraie arrivée : on repart de zéro (mais l'onglet garde son sid).
+        state = {sid: state.sid, last: 0, entries: []};
       }
       // Ex02 (nouvel arrivant : 3 derniers messages) ou messages manqués (reprise),
       // déjà triés du plus ancien au plus récent.

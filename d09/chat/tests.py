@@ -16,15 +16,37 @@ from .routing import websocket_urlpatterns
 app = URLRouter(websocket_urlpatterns)
 
 
-def communicator(room_id, user, last=None):
-    # last : id du dernier message vu, comme le fait chat.js après un F5.
-    query = f'?last={last}' if last is not None else ''
+def communicator(room_id, user, last=None, sid=None):
+    # sid : identifiant de l'onglet ; last : id du dernier message vu.
+    # Ce sont les paramètres que chat.js envoie, notamment après un F5.
+    params = []
+    if sid is not None:
+        params.append(f'sid={sid}')
+    if last is not None:
+        params.append(f'last={last}')
+    query = '?' + '&'.join(params) if params else ''
     c = WebsocketCommunicator(app, f'/ws/chat/{room_id}/{query}')
     c.scope['user'] = user
     return c
 
 
 class ViewTests(TestCase):
+    def test_pages_do_not_show_raw_template_comments(self):
+        """Un {# ... #} sur plusieurs lignes n'est pas un commentaire Django : il
+        s'afficherait tel quel dans la page."""
+        user = CustomUser.objects.create_user('zoe', password='x')
+        self.client.force_login(user)
+        room = Chatroom.objects.first()
+        for url in (reverse('account:account'), reverse('chat:room_list'),
+                    reverse('chat:room', args=[room.id])):
+            html = self.client.get(url).content.decode()
+            self.assertNotIn('{#', html, url)
+            self.assertNotIn('#}', html, url)
+        self.client.logout()
+        html = self.client.get(reverse('account:account')).content.decode()
+        self.assertNotIn('{#', html)
+        self.assertNotIn('#}', html)
+
     def test_three_default_rooms(self):
         r = self.client.get(reverse('chat:room_list'))
         self.assertEqual(Chatroom.objects.count(), 3)
@@ -106,17 +128,22 @@ class RefreshTests(TransactionTestCase):
         self.alice = CustomUser.objects.create_user('alice', password='x')
         self.bob = CustomUser.objects.create_user('bob', password='x')
 
+    def tearDown(self):
+        for task in list(consumers.PENDING.values()):
+            task.cancel()
+
+    async def _drain(self, *comms):
+        for c in comms:
+            while not await c.receive_nothing(timeout=0.05):
+                await c.receive_json_from()
+
     async def _start(self):
         """alice et bob dans la room, 5 messages échangés. Renvoie (a, b, id du dernier)."""
-        a = communicator(self.room.id, self.alice)
-        b = communicator(self.room.id, self.bob)
+        a = communicator(self.room.id, self.alice, last=0, sid='sid-alice-0001')
+        b = communicator(self.room.id, self.bob, last=0, sid='sid-bob-000001')
         await a.connect()
         await b.connect()
-        await a.receive_nothing(timeout=0.2)  # laisse passer joined/users
-        while not await a.receive_nothing(timeout=0.05):
-            await a.receive_json_from()
-        while not await b.receive_nothing(timeout=0.05):
-            await b.receive_json_from()
+        await self._drain(a, b)
         last = None
         for i in range(5):
             await a.send_json_to({'message': f'm{i}'})
@@ -124,36 +151,48 @@ class RefreshTests(TransactionTestCase):
             await b.receive_json_from()
         return a, b, last
 
-    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 5)
-    async def test_refresh_is_silent_and_resumed(self):
-        a, b, last = await self._start()
-
-        await b.disconnect()                       # F5 : l'ancien websocket se ferme...
-        # ... pendant ce temps alice poste un message que bob va manquer
-        await a.send_json_to({'message': 'while you reload'})
-        missed_id = (await a.receive_json_from())['id']
-
-        b2 = communicator(self.room.id, self.bob, last=last)   # ... et un nouveau s'ouvre
-        self.assertTrue((await b2.connect())[0])
+    async def _assert_silent_resume(self, a, b2, missed):
+        """b2 a repris la place de bob : seulement les messages manqués, et alice ne
+        reçoit ni "left" ni "joined" (même une fois le délai de grâce écoulé)."""
         hist = await b2.receive_json_from()
         self.assertTrue(hist['resumed'])
-        # seulement le message manqué, pas les 3 derniers
-        self.assertEqual([(m['id'], m['message']) for m in hist['messages']],
-                         [(missed_id, 'while you reload')])
+        self.assertEqual([m['message'] for m in hist['messages']], missed)
         self.assertEqual((await b2.receive_json_from())['users'], ['alice', 'bob'])
-
-        # alice ne reçoit ni "left" ni "joined" : seulement la liste inchangée
         got = await a.receive_json_from()
         self.assertEqual((got['type'], got['users']), ('users', ['alice', 'bob']))
-        self.assertTrue(await a.receive_nothing(timeout=0.3))
-        self.assertEqual(consumers.ONLINE[self.room.id], {'alice': 1, 'bob': 1})
-        self.assertFalse(consumers.PENDING)
+        self.assertTrue(await a.receive_nothing(timeout=0.4))
 
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 0.2)
+    async def test_refresh_old_socket_closed_first(self):
+        """F5 "classique" : l'ancien websocket se ferme, puis le nouveau s'ouvre."""
+        a, b, last = await self._start()
+        await b.disconnect()
+        await a.send_json_to({'message': 'while you reload'})   # bob la manque
+        await a.receive_json_from()
+        b2 = communicator(self.room.id, self.bob, last=last, sid='sid-bob-000001')
+        self.assertTrue((await b2.connect())[0])
+        await self._assert_silent_resume(a, b2, ['while you reload'])
+        self.assertEqual({u: dict(t) for u, t in consumers.ONLINE[self.room.id].items()},
+                         {'alice': {'sid-alice-0001': 1}, 'bob': {'sid-bob-000001': 1}})
+        self.assertFalse(consumers.PENDING)
         await a.disconnect()
         await b2.disconnect()
-        for t in list(consumers.PENDING.values()):
-            for task in t:
-                task.cancel()
+
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 0.2)
+    async def test_refresh_new_socket_arrives_before_old_one_closes(self):
+        """La course vue dans un vrai navigateur : le nouveau websocket arrive AVANT
+        que le serveur ait reçu la fermeture de l'ancien."""
+        a, b, last = await self._start()
+        b2 = communicator(self.room.id, self.bob, last=last, sid='sid-bob-000001')
+        self.assertTrue((await b2.connect())[0])      # b est encore ouvert
+        await self._assert_silent_resume(a, b2, [])
+        await b.disconnect()                          # la fermeture de l'ancien arrive après
+        self.assertTrue(await a.receive_nothing(timeout=0.5))   # (délai de grâce dépassé)
+        self.assertEqual({u: dict(t) for u, t in consumers.ONLINE[self.room.id].items()},
+                         {'alice': {'sid-alice-0001': 1}, 'bob': {'sid-bob-000001': 1}})
+        self.assertFalse(consumers.PENDING)
+        await a.disconnect()
+        await b2.disconnect()
 
     @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 0.05)
     async def test_reconnect_after_grace_is_a_real_leave_and_join(self):
@@ -164,7 +203,7 @@ class RefreshTests(TransactionTestCase):
                          'bob has left the chat')
         self.assertEqual((await a.receive_json_from())['users'], ['alice'])
 
-        b2 = communicator(self.room.id, self.bob, last=last)
+        b2 = communicator(self.room.id, self.bob, last=last, sid='sid-bob-000001')
         await b2.connect()
         hist = await b2.receive_json_from()
         self.assertFalse(hist['resumed'])
@@ -176,16 +215,33 @@ class RefreshTests(TransactionTestCase):
         await b2.disconnect()
         await asyncio.sleep(0.2)
 
-    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 5)
-    async def test_last_param_without_pending_leave_is_not_a_resume(self):
-        # ?last=... mais personne en attente : c'est une arrivée normale.
-        a = communicator(self.room.id, self.alice, last=0)
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 0.05)
+    async def test_two_tabs_of_same_user_are_independent(self):
+        a, b, last = await self._start()
+        b2 = communicator(self.room.id, self.bob, last=0, sid='sid-bob-tab-two')
+        await b2.connect()
+        hist = await b2.receive_json_from()
+        self.assertFalse(hist['resumed'])           # autre onglet : vraie arrivée
+        await self._drain(a, b, b2)
+        await b2.disconnect()                       # l'onglet 2 se ferme...
+        await asyncio.sleep(0.2)
+        self.assertEqual((await a.receive_json_from())['message'],
+                         'bob has left the chat')
+        self.assertEqual((await a.receive_json_from())['users'], ['alice', 'bob'])
+        await a.disconnect()
+        await b.disconnect()
+        await asyncio.sleep(0.2)
+
+    @mock.patch.object(consumers, 'LEAVE_GRACE_SECONDS', 0.05)
+    async def test_missing_or_invalid_sid_is_a_new_arrival(self):
+        a = communicator(self.room.id, self.alice, last=0)            # sans sid
         await a.connect()
-        hist = await a.receive_json_from()
-        self.assertFalse(hist['resumed'])
+        self.assertFalse((await a.receive_json_from())['resumed'])
         self.assertEqual((await a.receive_json_from())['message'],
                          'alice has joined the chat')
+        a2 = communicator(self.room.id, self.alice, last=0, sid='no good!')   # sid invalide
+        await a2.connect()
+        self.assertFalse((await a2.receive_json_from())['resumed'])
         await a.disconnect()
-        for t in list(consumers.PENDING.values()):
-            for task in t:
-                task.cancel()
+        await a2.disconnect()
+        await asyncio.sleep(0.2)

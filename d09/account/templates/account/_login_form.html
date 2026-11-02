@@ -1,6 +1,6 @@
-{# Fragment affiché quand l'utilisateur n'est pas connecté. Il contient DEUX blocs :
+{% comment %} Fragment affiché quand l'utilisateur n'est pas connecté. Il contient DEUX blocs :
    #login-box (formulaire de login, visible) et #register-box (création d'utilisateur,
-   caché par l'attribut HTML "hidden", qui marche même sans Bootstrap). account.js bascule de l'un à l'autre et envoie les formulaires en AJAX. #}
+   caché par l'attribut HTML "hidden", qui marche même sans Bootstrap). account.js bascule de l'un à l'autre et envoie les formulaires en AJAX. {% endcomment %}
 <div id="login-box">
   <h2 class="mb-3">Login</h2>
   <div id="form-errors" class="text-danger mb-2"></div>
