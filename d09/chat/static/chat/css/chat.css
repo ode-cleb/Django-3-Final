@@ -1,0 +1,20 @@
+/* Ex04: fixed-size message container, scrolls when full. */
+#messages {
+  width: 500px;
+  height: 350px;
+  overflow-y: auto;
+  flex: 0 0 auto;
+  word-wrap: break-word;
+}
+
+#users {
+  width: 200px;
+  height: 350px;
+  overflow-y: auto;
+  flex: 0 0 auto;
+}
+
+#messages .system {
+  color: #6c757d;
+  font-style: italic;
+}

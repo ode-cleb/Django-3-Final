@@ -1,0 +1,23 @@
+{% extends 'account/base.html' %}
+{% load static %}
+{% block container_width %}760px{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'chat/css/chat.css' %}">{% endblock %}
+{% block content %}
+<h2 class="mb-3" id="room-name">{{ room.name }}</h2>
+<div class="d-flex gap-3">
+  <div id="messages" class="border rounded p-2"></div>
+  <div id="users" class="border rounded p-2">
+    <strong>Connected</strong>
+    <ul id="user-list" class="list-unstyled mb-0"></ul>
+  </div>
+</div>
+<form id="chat-form" class="d-flex gap-2 mt-3" autocomplete="off">
+  <input id="chat-input" class="form-control" type="text" placeholder="Message" autofocus>
+  <button class="btn btn-primary" type="submit">Send</button>
+</form>
+<p class="mt-3"><a href="{% url 'chat:room_list' %}">&larr; Rooms</a></p>
+{% endblock %}
+{% block scripts %}
+<script>window.CHAT_ROOM_ID = {{ room.id }};</script>
+<script src="{% static 'chat/js/chat.js' %}"></script>
+{% endblock %}

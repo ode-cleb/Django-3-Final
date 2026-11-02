@@ -31,13 +31,16 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'account',
+    'chat',
 ]
 
 AUTH_USER_MODEL = 'account.CustomUser'
@@ -70,6 +73,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'd09.wsgi.application'
+ASGI_APPLICATION = 'd09.asgi.application'
+
+# In-memory layer: no Redis needed, valid for a single server process.
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+
+LOGIN_URL = 'account:account'
 
 
 # Database

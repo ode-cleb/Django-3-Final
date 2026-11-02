@@ -1,0 +1,12 @@
+{% extends 'account/base.html' %}
+{% block content %}
+<h2 class="mb-3">Chat rooms</h2>
+<ul class="list-group mb-3">
+  {% for room in rooms %}
+    <li class="list-group-item"><a href="{% url 'chat:room' room.id %}">{{ room.name }}</a></li>
+  {% empty %}
+    <li class="list-group-item">No chatroom yet.</li>
+  {% endfor %}
+</ul>
+<a href="{% url 'account:account' %}">Account</a>
+{% endblock %}

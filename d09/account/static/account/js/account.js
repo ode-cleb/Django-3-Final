@@ -10,12 +10,11 @@ $(function () {
     return value;
   }
 
-  const csrftoken = getCookie('csrftoken');
-
   $.ajaxSetup({
     beforeSend: function (xhr, settings) {
       if (!/^(GET|HEAD|OPTIONS|TRACE)$/.test(settings.type)) {
-        xhr.setRequestHeader('X-CSRFToken', csrftoken);
+        // Re-read the cookie on every request: login()/logout() rotate the token.
+        xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
       }
     }
   });
